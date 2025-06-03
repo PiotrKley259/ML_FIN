@@ -264,8 +264,8 @@ class PairSelector:
         
         # Sous-échantillonnage de la fenêtre temporelle
         historical_data = data[
-            (pd.to_datetime(data['MthCalDt']) >= start_date) & 
-            (pd.to_datetime(data['MthCalDt']) <= cutoff_date)
+            (pd.to_datetime(data['date']) >= start_date) & 
+            (pd.to_datetime(data['date']) <= cutoff_date)
         ].copy()
         
         logger.debug(f"Historical data: {len(historical_data)} records")
@@ -276,7 +276,7 @@ class PairSelector:
         
         # Transformation en matrice T x N (MthCalDt x Ticker)
         pivot_data = historical_data.pivot_table(
-            index='MthCalDt', 
+            index='date', 
             columns='Ticker', 
             values='MthRet'
         )
@@ -297,7 +297,7 @@ class PairSelector:
         
         # Option : réduire le nombre de tickers pour des raisons de performance
         if len(valid_tickers) > 100:
-            top_tickers = ticker_counts.nlargest(100).index.tolist()  # adaptable
+            top_tickers = ticker_counts.nlargest(1000).index.tolist()  # adaptable
             valid_tickers = [t for t in valid_tickers if t in top_tickers]
             logger.info(f"Limited to top 100 tickers by data availability")
         
@@ -423,10 +423,10 @@ class PredictionEngine:
         """
         try:
             # Préparation des données
-            feature_cols = [col for col in ticker_data.columns if col not in ['MthCalDt', 'sprtrn', 'Ticker', 'MthRet']]
+            feature_cols = [col for col in ticker_data.columns if col not in ['date', 'sprtrn', 'Ticker', 'MthRet']]
             X = ticker_data[feature_cols].fillna(0)
             y = ticker_data['MthRet'].fillna(0)
-            dates = ticker_data['MthCalDt']
+            dates = ticker_data['date']
             
             if len(X) < self.config['min_observations']:
                 logger.warning(f"Insufficient data for ticker {ticker}: {len(X)} records")
@@ -1113,10 +1113,12 @@ def main():
         main_csv = os.path.join(folder, 'monthly_crsp.csv')
         jkp_csv = os.path.join(folder1, 'JKP_filtered.csv')
         zimmer_csv = os.path.join(folder1, 'Zimmer_filtered.csv')
+        norm_csv = os.path.join(folder1, 'CompFirmCharac_filtred.csv')
         
         data_main = pd.read_csv(main_csv)
         data_jkp = pd.read_csv(jkp_csv)
         data_zimmer = pd.read_csv(zimmer_csv)
+        data_comp = pd.read_csv(norm_csv)
         
     except FileNotFoundError as e:
         logger.error(f"Data files not found: {e}")
@@ -1127,8 +1129,13 @@ def main():
     data_main['date'] = pd.to_datetime(data_main['MthCalDt'])
     data_jkp['date'] = pd.to_datetime(data_jkp['date'])
     data_zimmer['date'] = pd.to_datetime(data_zimmer['date'], errors='coerce')
+    data_comp['datadate'] = pd.to_datetime(data_comp['datadate'])
     
-    start_date = pd.to_datetime('2010-01-01')
+    # Harmoniser le nom de colonne pour le merge
+    data_comp['tic'] = data_comp['tic'].astype(str)
+    data_comp.rename(columns={'tic': 'Ticker'}, inplace=True)
+    
+    start_date = pd.to_datetime('2000-01-01')
     data_main = data_main[data_main['date'] >= start_date]
     data_jkp = data_jkp[data_jkp['date'] >= start_date]
     data_zimmer = data_zimmer[data_zimmer['date'] >= start_date]
@@ -1153,12 +1160,32 @@ def main():
     # Filtrer les tickers avec suffisamment de données - CORRIGÉ pour données mensuelles
     merged = merged[merged.groupby('Ticker')['Ticker'].transform('count') >= TRADING_CONFIG['min_observations']]
     
-    # Nettoyer les colonnes
-    columns_to_drop = ['PERMNO', 'HdrCUSIP', 'CUSIP', 'TradingSymbol', 'PERMCO', 'SICCD', 'NAICS', 'date', 'year', 'month']
+    # Nettoyage des colonnes inutiles
+    columns_to_drop = [
+    'PERMNO', 'HdrCUSIP', 'CUSIP', 'TradingSymbol',
+    'PERMCO', 'SICCD', 'NAICS', 'year', 'month','MthCalDt',
+    ]
     merged.drop(columns=[col for col in columns_to_drop if col in merged.columns], inplace=True)
     
     # Décaler les rendements (pas de look-ahead)
     merged[['MthRet', 'sprtrn']] = merged.groupby('Ticker')[['MthRet', 'sprtrn']].shift(1).fillna(0)
+    
+    # Fusion temporelle avec les caractéristiques firmes (alignement sur Ticker + date)
+    merged = merged.merge(
+        data_comp.drop(columns=['gvkey', 'cusip'], errors='ignore'),
+        left_on=['Ticker', 'date'],
+        right_on=['Ticker', 'datadate'],
+        how='left'
+    )
+    
+    # Nettoyage post-fusion
+    merged.drop(columns=['datadate'], inplace=True)
+    
+    # Identify the columns from data_comp (excluding join keys)
+    comp_columns = data_comp.drop(columns=['gvkey', 'cusip', 'datadate'], errors='ignore').columns
+
+    # Keep only rows where all comp_columns are non-null
+    merged = merged.dropna(subset=comp_columns)
     
     logger.info(f"Data loaded: {len(merged)} records, {merged['Ticker'].nunique()} unique tickers")
     
@@ -1172,7 +1199,7 @@ def main():
     logger.info("Selecting trading pairs without look-ahead bias...")
     
     # Obtenir les dates uniques pour la sélection des paires
-    unique_dates = sorted(merged['MthCalDt'].unique())
+    unique_dates = sorted(merged['date'].unique())
     
     # CORRIGÉ: Commencer après avoir assez de données et utiliser des intervalles mensuels
     start_idx = TRADING_CONFIG['correlation_window']  # 36 mois minimum
@@ -1309,7 +1336,7 @@ def main():
             
             # Obtenir les rendements de marché alignés
             market_returns = merged[merged['Ticker'] == ticker1]['sprtrn']
-            market_dates = merged[merged['Ticker'] == ticker1]['MthCalDt']
+            market_dates = merged[merged['Ticker'] == ticker1]['date']
             market_data = pd.DataFrame({'Date': market_dates, 'sprtrn': market_returns})
             
             # Aligner avec les dates de trading
