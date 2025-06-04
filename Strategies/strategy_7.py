@@ -627,9 +627,15 @@ class MLPairsTrader:
     def train_pair_selection_model(self, labeled_data: pd.DataFrame) -> bool:
         """Entraîne le modèle de sélection des paires avec validation temporelle"""
         logger.info("Training pair selection model...")
-        # On garde que les lignes où le label est 0 ou 1
+        # NETTOYAGE : On garde que les lignes où le label est 0 ou 1
         labeled_data = labeled_data[(labeled_data['is_profitable'] == 0) | (labeled_data['is_profitable'] == 1)]
-      
+
+        # Ensuite, on enlève les lignes où il manque la cible ou le score de qualité
+        labeled_data = labeled_data.dropna(subset=['is_profitable', 'quality_score'])
+
+
+
+        
         # Select features for the model (exclude target and metadata columns)
         exclude_cols = ['date', 'pair_id', 'ticker1', 'ticker2', 'is_profitable', 
                        'quality_score', 'pnl', 'trades', 'forward_spread_return']
