@@ -68,11 +68,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 print("Device utilisé :", device)
 
-# Configuration des dossiers
-folder = os.path.expanduser('~/ML/')
+import os
 
-# Chargement des données
+# Utilise le répertoire courant (où startegy.py est exécuté)
+folder = os.path.dirname(os.path.abspath(__file__))
 main_csv = os.path.join(folder, 'formatted_full_data_test_1.csv')
+
 
 
 merged = pd.read_csv(main_csv)
@@ -163,4 +164,41 @@ dl_analysis = analyze_strategy_performance(dl_strategy)
 # Visualiser les résultats
 plot_strategy_results(dl_strategy)
 
+output_folder = os.path.join(folder, 'results')
+os.makedirs(output_folder, exist_ok=True)
 
+with open(os.path.join(output_folder, 'strategy_performance.txt'), 'w') as f:
+    f.write("Random Forest:\n")
+    f.write(str(rf_analysis) + '\n\n')
+    
+    f.write("XGBoost:\n")
+    f.write(str(xgb_analysis) + '\n\n')
+
+    f.write("Deep Learning + Lasso:\n")
+    f.write(str(dl_analysis) + '\n\n')
+
+    f.write("Strategy Comparison:\n")
+    f.write(str(strategy_comparison) + '\n')
+
+dl_lasso_results['final_feature_stability'].to_csv(
+    os.path.join(output_folder, 'feature_stability.csv'), index=False
+)
+
+plots_folder = os.path.join(output_folder, 'plots')
+os.makedirs(plots_folder, exist_ok=True)
+
+plot_sliding_window_results(rf_results, xgb_results)
+plt.savefig(os.path.join(plots_folder, 'sliding_window_results.png'), bbox_inches='tight')
+plt.close()
+
+plot_strategy_results(rf_strategy)
+plt.savefig(os.path.join(plots_folder, 'rf_strategy.png'), bbox_inches='tight')
+plt.close()
+
+plot_strategy_results(xgb_strategy)
+plt.savefig(os.path.join(plots_folder, 'xgb_strategy.png'), bbox_inches='tight')
+plt.close()
+
+plot_strategy_results(dl_strategy)
+plt.savefig(os.path.join(plots_folder, 'dl_strategy.png'), bbox_inches='tight')
+plt.close()
