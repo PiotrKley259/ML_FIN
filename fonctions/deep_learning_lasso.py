@@ -14,12 +14,17 @@ from torch.utils.data import DataLoader, TensorDataset
 import warnings
 warnings.filterwarnings('ignore')
 
+
 class DeepLearningRegressor(nn.Module):
     """
     Réseau de neurones profond pour la régression.
     """
     def __init__(self, input_dim, hidden_layers, dropout_rate=0.2, activation='relu'):
         super(DeepLearningRegressor, self).__init__()
+        
+        # Vérifications de sécurité
+        if not isinstance(input_dim, int) or input_dim <= 0:
+            raise ValueError(f"input_dim doit être un entier positif, reçu: {input_dim}")
         
         # Fonction d'activation
         if activation == 'relu':
@@ -35,12 +40,13 @@ class DeepLearningRegressor(nn.Module):
         
         # Construction des couches
         layers = []
-        prev_size = input_dim
+        prev_size = int(input_dim)
         
         for hidden_size in hidden_layers:
+            hidden_size = int(hidden_size)
             layers.extend([
                 nn.Linear(prev_size, hidden_size),
-                nn.BatchNorm1d(hidden_size),
+                nn.LayerNorm(hidden_size),  # Remplacé BatchNorm par LayerNorm
                 self.activation,
                 nn.Dropout(dropout_rate)
             ])
@@ -62,7 +68,6 @@ class DeepLearningRegressor(nn.Module):
     
     def forward(self, x):
         return self.network(x)
-
 
 class AdaptiveFeatureSelector:
     """
@@ -375,7 +380,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
 def sliding_window_dl_prediction_with_lasso(
     df: pd.DataFrame,
     date_column: str = 'date',
-    target_column: str = 'MthRet',
+    target_column: str = 'target_ret',
     feature_columns: list = None,
     train_years: int = 5,
     test_years: int = 1,
@@ -448,7 +453,7 @@ def sliding_window_dl_prediction_with_lasso(
     
     # Définir les features initiales
     if feature_columns is None:
-        exclude_cols = [target_column, 'date', 'MthRet', 'Ticker', 'sprtrn']
+        exclude_cols = [target_column, date_column]
         feature_columns = [col for col in df_sorted.columns if col not in exclude_cols]
     
     # Initialisation du sélecteur de features
@@ -463,11 +468,11 @@ def sliding_window_dl_prediction_with_lasso(
     
     # Paramètres de base pour le Deep Learning
     base_params = {
-        'hidden_layers': [128, 64, 32],
+        'hidden_layers': [512, 256, 128, 64],
         'dropout_rate': 0.3,
-        'learning_rate': 0.001,
-        'batch_size': 64,
-        'epochs': 200,
+        'learning_rate': 0.0001,
+        'batch_size': 128,
+        'epochs': 500,
         'activation': 'relu',
         'optimizer': 'adam',
         'patience': 15,
@@ -617,8 +622,8 @@ def sliding_window_dl_prediction_with_lasso(
                         val_loader = DataLoader(val_dataset, batch_size=effective_batch_size)
                         
                         model = DeepLearningRegressor(
-                            input_dim=X_tr.shape[1],
-                            hidden_layers=params['hidden_layers'],
+                            input_dim=int(X_tr.shape[1]),
+                            hidden_layers=[int(x) for x in params['hidden_layers']],
                             dropout_rate=params['dropout_rate'],
                             activation=params['activation']
                         )
@@ -751,8 +756,8 @@ def sliding_window_dl_prediction_with_lasso(
             
             # Modèle final avec les features sélectionnées
             final_model = DeepLearningRegressor(
-                input_dim=X_train_array.shape[1],  # Utilise le nombre de features sélectionnées
-                hidden_layers=best_params['hidden_layers'],
+                input_dim=int(X_train_array.shape[1]),  # Utilise le nombre de features sélectionnées
+                hidden_layers=[int(x) for x in best_params['hidden_layers']],
                 dropout_rate=best_params['dropout_rate'],
                 activation=best_params['activation']
             )
@@ -1014,7 +1019,7 @@ def analyze_feature_selection_results(results):
 
 
 # Exemple d'utilisation complète:
-"""
+""" 
 # Installation nécessaire:
 # pip install torch optuna scikit-learn pandas numpy
 
@@ -1054,3 +1059,72 @@ if not stability_report.empty:
     print(f"\\nFeatures très stables (>0.8): {len(stability_report[stability_report['stability_score'] > 0.8])}")
     print(f"Features moyennement stables (0.5-0.8): {len(stability_report[(stability_report['stability_score'] > 0.5) & (stability_report['stability_score'] <= 0.8)])}")
 """
+
+# Exemple d'utilisation complète:
+"""
+# Installation nécessaire:
+# pip install torch optuna scikit-learn pandas numpy
+
+# Appel de la fonction avec sélection Lasso
+dl_lasso_results = sliding_window_dl_prediction_with_lasso(
+    df=your_dataframe,
+    date_column='date',
+    target_column='MthRet',
+    feature_columns=None,  # Sera automatiquement défini
+    train_years=5,
+    test_years=1,
+    tune_frequency=4,
+    n_trials=15,
+    early_stopping_rounds=8,
+    # Paramètres spécifiques à la sélection Lasso
+    feature_selection_method='lasso',  # 'lasso', 'elastic_net', 'adaptive_lasso'
+    feature_selection_frequency=1,     # Re-sélection à chaque fenêtre
+    max_features=50,                   # Maximum 50 features
+    min_features=10,                   # Minimum 10 features
+    lasso_alpha_range=(1e-4, 1e-1),   # Plage alpha pour Lasso
+    stability_threshold=0.7,           # Seuil de stabilité
+    memory_factor=0.3                  # Facteur de mémoire
+)
+
+# Analyse détaillée des résultats de sélection
+feature_analysis = analyze_feature_selection_results(dl_lasso_results)
+
+# Comparaison avec la version sans sélection
+print("\\n=== COMPARAISON AVEC/SANS SÉLECTION DE FEATURES ===")
+print(f"Avec sélection Lasso    : R² = {dl_lasso_results['overall_metrics']['overall_r2']:.4f}")
+print(f"Features moyennes       : {dl_lasso_results['overall_metrics']['avg_features_selected']:.1f}")
+print(f"Réduction de features   : {dl_lasso_results['overall_metrics']['feature_reduction_ratio']:.1%}")
+
+# Rapport de stabilité final
+stability_report = dl_lasso_results['final_feature_stability']
+if not stability_report.empty:
+    print(f"\\nFeatures très stables (>0.8): {len(stability_report[stability_report['stability_score'] > 0.8])}")
+    print(f"Features moyennement stables (0.5-0.8): {len(stability_report[(stability_report['stability_score'] > 0.5) & (stability_report['stability_score'] <= 0.8)])}")
+    
+    #APPEL OPTIMAL
+    dl_lasso_results = sliding_window_dl_prediction_with_lasso(
+    df=merged,
+    date_column='date',
+    target_column='target_ret',
+    feature_columns=None,  # Sera automatiquement défini
+    train_years=40, #essaye 20 30
+    test_years=1,
+    tune_frequency=5,
+    n_trials=3,
+    early_stopping_rounds=8,
+    # Paramètres spécifiques à la sélection Lasso
+    feature_selection_method='adaptive_lasso',  # 'lasso', 'elastic_net', 'adaptive_lasso'
+    feature_selection_frequency=1,     # Re-sélection à chaque fenêtre
+    max_features= None,                   # Maximum 50 features
+    min_features=10,                   # Minimum 10 features
+    lasso_alpha_range=(1e-6, 1e-1),   # Plage alpha pour Lasso
+    stability_threshold=0.4,           # Seuil de stabilité
+    memory_factor=0.3                  # Facteur de mémoire
+)
+    
+    
+    
+"""
+
+
+
