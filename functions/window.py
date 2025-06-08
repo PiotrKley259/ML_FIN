@@ -615,7 +615,7 @@ def sliding_window_dl_prediction_with_lasso(
         # === NORMALISATION FINALE SÉLECTIVE (SANS stock_idx) ===
         # Identifier les features à normaliser et celles à garder intactes (SANS stock_idx)
         features_to_normalize = [col for col in current_selected_features if 
-                               '_mask' not in col and '_flag' not in col and 'decimal_year' not in col]
+                               '_mask' not in col and '_flag' not in col]
         features_to_keep_raw = [col for col in current_selected_features if col not in features_to_normalize]
         
         print(f"Features à normaliser: {len(features_to_normalize)}")
