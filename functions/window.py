@@ -458,7 +458,7 @@ def sliding_window_dl_prediction_with_lasso(
             print(f"Winsorisation sélective des données (1%-99% percentiles)...")
             
             # Identifier les colonnes temporelles à exclure de la winsorisation
-            temporal_features = [col for col in X_selection.columns if 'decimal_year' in col or 'timestamp' in col or 'days_since' in col]
+            temporal_features = [col for col in X_selection.columns if 'decimal_year' in col or 'timestamp' in col or 'days_since' in col or '_flag']
             regular_features = [col for col in X_selection.columns if col not in temporal_features]
             
             print(f"Features temporelles (non winsorisées): {temporal_features}")
