@@ -250,7 +250,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
 def sliding_window_dl_prediction_with_lasso(
     df: pd.DataFrame,
     date_column: str = 'date',
-    target_column: str = 'target_ret',
+    target_column: str = 'ret_target',
     feature_columns: list = None,
     train_years: int = 5,
     test_years: int = 1,
@@ -459,7 +459,7 @@ def sliding_window_dl_prediction_with_lasso(
             # Identifier les colonnes à exclure de la winsorisation ET de la normalisation
             protected_features = [col for col in X_selection.columns if 
                                 'decimal_year' in col or 'timestamp' in col or 'days_since' in col or 
-                                '_mask' in col or '_flag' in col or 'stock_idx' in col]
+                                '_mask' in col or '_flag' in col or 'permno' in col]
             
             # Features régulières (winsorisées ET normalisées)
             regular_features = [col for col in X_selection.columns if col not in protected_features]
@@ -520,7 +520,7 @@ def sliding_window_dl_prediction_with_lasso(
             
             # === EXCLUSION DE STOCK_IDX DES FEATURES FINALES ===
             # Ajouter automatiquement les features protégées SAUF stock_idx
-            protected_features_for_model = [col for col in protected_features if 'stock_idx' not in col]
+            protected_features_for_model = [col for col in protected_features if 'permno' not in col]
             current_selected_features = selected_features_lasso + protected_features_for_model
             
             print(f"Features sélectionnées par LASSO: {len(selected_features_lasso)}")
@@ -666,7 +666,7 @@ def sliding_window_dl_prediction_with_lasso(
         print(f"Features finales: {final_feature_names}")
         
         # Vérification finale que stock_idx est bien absent
-        if any('stock_idx' in col for col in final_feature_names):
+        if any('permno' in col for col in final_feature_names):
             print("ERREUR: stock_idx encore présent dans les features finales!")
             raise ValueError("stock_idx ne devrait pas être dans les features d'entraînement!")
         else:
@@ -988,14 +988,13 @@ def sliding_window_dl_prediction_with_lasso(
             'test_mae': mean_absolute_error(y_test, test_pred),
             'test_r2': r2_score(y_test, test_pred),
     
-            # Train metrics (NOUVEAU)
+            # Train metrics
             'train_mse': train_mse,
             'train_rmse': train_rmse,
             'train_mae': mean_absolute_error(y_train, train_pred),
             'train_r2': train_r2,
     
-            # Overfitting indicator (NOUVEAU)
-            'overfitting_ratio': train_r2 - r2_score(y_test, test_pred),
+
             
             'mse': mean_squared_error(y_test, test_pred),
             'rmse': np.sqrt(mean_squared_error(y_test, test_pred)),
@@ -1049,7 +1048,6 @@ def sliding_window_dl_prediction_with_lasso(
         print(f"Fenêtre {window_count + 1}: "
                 f"R² train = {train_r2:.4f}, "
                 f"R² test = {window_metrics['test_r2']:.4f}, "
-                f"Overfitting = {window_metrics['overfitting_ratio']:.4f}, "
                 f"RMSE = {window_metrics['test_rmse']:.6f}, "
                 f"Features = {len(current_selected_features)}, "
                 f"Epochs = {training_info['final_epoch']}")
@@ -1170,7 +1168,7 @@ def calculate_pytorch_feature_importance(model, X_test, y_test, device):
 def sliding_window_r_prediction(
     df: pd.DataFrame,
     date_column: str = 'date',
-    target_column: str = 'target_ret',
+    target_column: str = 'ret_target',
     feature_columns: list = None,
     train_years: int = 5,
     test_years: int = 1,
@@ -1433,7 +1431,7 @@ def sliding_window_r_prediction(
 def sliding_window_xgb_prediction(
     df: pd.DataFrame,
     date_column: str = 'date',
-    target_column: str = 'target_ret',
+    target_column: str = 'ret_target',
     feature_columns: list = None,
     train_years: int = 5,
     test_years: int = 1,
@@ -1524,9 +1522,9 @@ def sliding_window_xgb_prediction(
 
     
     base_params = {
-        'n_estimators': 100,
+        'n_estimators': 200,
         'max_depth': 6,
-        'learning_rate': 0.1,
+        'learning_rate': 0.05,
         'subsample': 0.8,
         'colsample_bytree': 0.8,
         'random_state': 42,

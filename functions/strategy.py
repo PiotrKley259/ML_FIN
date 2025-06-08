@@ -19,8 +19,8 @@ def implement_long_short_strategy(
     results: Dict[str, Any],
     df: pd.DataFrame,
     date_column: str = 'date',
-    target_column: str = 'target_ret',
-    ticker_column: str = 'stock_idx',
+    target_column: str = 'ret_target',
+    ticker_column: str = 'permno',
     percentile_threshold: float = 0.1,
     rebalance_frequency: str = 'yearly'  # 'yearly', 'quarterly', 'monthly'
 ) -> Dict[str, Any]:
