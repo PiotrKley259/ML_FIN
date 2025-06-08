@@ -268,6 +268,7 @@ def sliding_window_dl_prediction_with_lasso(
     lasso_alpha_range: Tuple[float, float] = (1e-4, 1e1),
     stability_threshold: float = 0.7,
     memory_factor: float = 0.3,
+    include_date_as_feature : bool = True,
     **base_dl_params
 ) -> Dict[str, Any]:
     """
@@ -340,12 +341,32 @@ def sliding_window_dl_prediction_with_lasso(
     # --- Data preparation ---
     df = df.copy()
     df[date_column] = pd.to_datetime(df[date_column])
+        #Convertir la date en feature numérique si demandé
+    if include_date_as_feature:
+
+        #Année décimale (ex: 2023.5 pour mi-2023)
+        df['decimal_year'] = (df[date_column].dt.year + 
+                             df[date_column].dt.dayofyear / 365.25)
+        
+        print(f"Features date créées: date_timestamp, days_since_start, decimal_year")
+    
     df_sorted = df.sort_values(by=date_column)
 
-    # Determine features to use
+    #Exclure seulement la colonne date originale (string/datetime)
+    # mais garder les features numériques créées
     if feature_columns is None:
-        exclude_cols = [target_column, date_column]
+        if include_date_as_feature:
+            # Exclure seulement la date originale, garder les features numériques
+            exclude_cols = [target_column, date_column]
+        else:
+            # Comportement original
+            exclude_cols = [target_column, date_column]
+            
         feature_columns = [col for col in df_sorted.columns if col not in exclude_cols]
+        
+        if include_date_as_feature:
+            date_features = [col for col in feature_columns if 'decimal_' in col]
+            print(f"Features date incluses dans le modèle: {date_features}")
 
     # --- Feature Selector Initialization ---
     feature_selector = AdaptiveFeatureSelector(
@@ -463,6 +484,7 @@ def sliding_window_dl_prediction_with_lasso(
             print(f"Features sélectionnées: {len(selected_features)}/{len(feature_columns)}")
             print(f"Alpha optimal: {lasso_alpha:.6f}")
             print(f"Top 5 features: {selected_features[:5]}")
+            
         # === PHASE 2: PRÉPARATION DES DONNÉES FINALES ===
         # Préparer les données finales avec les features sélectionnées
         if window_count % feature_selection_frequency == 0:
@@ -1035,6 +1057,7 @@ def sliding_window_r_prediction(
     tune_frequency: int = 4,
     n_trials: int = 20,
     early_stopping_rounds: int = 5,
+    include_date_as_feature : bool = True,
     **base_rf_params
 ) -> Dict[str, Any]:
     """
@@ -1087,12 +1110,32 @@ def sliding_window_r_prediction(
     """ --- DATA PREPARATION AND SETUP --- """
     df = df.copy()
     df[date_column] = pd.to_datetime(df[date_column])
+        # Convertir la date en feature numérique si demandé
+    if include_date_as_feature:
+        
+        #  Année décimale (ex: 2023.5 pour mi-2023)
+        df['decimal_year'] = (df[date_column].dt.year + 
+                             df[date_column].dt.dayofyear / 365.25)
+        
+        print(f"Features date créées: date_timestamp, days_since_start, decimal_year")
+    
     df_sorted = df.sort_values(by=date_column)
 
-    # Determine usable features
+    #Exclure seulement la colonne date originale (string/datetime)
+    # mais garder les features numériques créées
     if feature_columns is None:
-        exclude_cols = [target_column, date_column]
+        if include_date_as_feature:
+            # Exclure seulement la date originale, garder les features numériques
+            exclude_cols = [target_column, date_column]
+        else:
+            # Comportement original
+            exclude_cols = [target_column, date_column]
+            
         feature_columns = [col for col in df_sorted.columns if col not in exclude_cols]
+        
+        if include_date_as_feature:
+            date_features = [col for col in feature_columns if 'decimal_' in col]
+            print(f"Features date incluses dans le modèle: {date_features}")
 
     # Default Random Forest parameters (can be overridden)
     base_params = {
@@ -1265,7 +1308,8 @@ def sliding_window_xgb_prediction(
     test_years: int = 1,
     tune_frequency: int = 4,
     n_trials: int = 20,
-    early_stopping_rounds: int = 10,  # Not used in XGB fit, only for Optuna stopping
+    early_stopping_rounds: int = 10,# Not used in XGB fit, only for Optuna stopping
+    include_date_as_feature : bool = True,
     **base_xgb_params
 ) -> Dict[str, Any]:
     """
@@ -1316,11 +1360,32 @@ def sliding_window_xgb_prediction(
     """ --- DATA PREPARATION AND SETUP --- """
     df = df.copy()
     df[date_column] = pd.to_datetime(df[date_column])
-    df_sorted = df.sort_values(by=date_column)
+        #Convertir la date en feature numérique si demandé
+    if include_date_as_feature:
+        # Année décimale (ex: 2023.5 pour mi-2023)
+        df['decimal_year'] = (df[date_column].dt.year + 
+                             df[date_column].dt.dayofyear / 365.25)
+        
+        print(f"Features date créées: date_timestamp, days_since_start, decimal_year")
     
+    df_sorted = df.sort_values(by=date_column)
+
+    #Exclure seulement la colonne date originale (string/datetime)
+    # mais garder les features numériques créées
     if feature_columns is None:
-        exclude_cols = [target_column, date_column]
+        if include_date_as_feature:
+            # Exclure seulement la date originale, garder les features numériques
+            exclude_cols = [target_column, date_column]
+        else:
+            # Comportement original
+            exclude_cols = [target_column, date_column]
+            
         feature_columns = [col for col in df_sorted.columns if col not in exclude_cols]
+        
+        if include_date_as_feature:
+            date_features = [col for col in feature_columns if 'decimal_' in col]
+            print(f"Features date incluses dans le modèle: {date_features}")
+
     
     base_params = {
         'n_estimators': 100,
