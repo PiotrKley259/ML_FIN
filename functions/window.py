@@ -446,7 +446,7 @@ def sliding_window_dl_prediction_with_lasso(
             current_start += pd.DateOffset(years=1)
             continue
 
-        # --- PHASE 1: FEATURE SELECTION ---
+# --- PHASE 1: FEATURE SELECTION ---
         if window_count % feature_selection_frequency == 0:
             print(f"Fenêtre {window_count + 1}: Préparation des données pour sélection des features...")
     
@@ -454,97 +454,142 @@ def sliding_window_dl_prediction_with_lasso(
             X_selection = train_data[feature_columns].fillna(train_data[feature_columns].median())
             y_selection = train_data[target_column]
     
-            # === ÉTAPE 1 : WINSORISATION POUR LA SÉLECTION DE FEATURES ===
-            print(f"Winsorisation des données de sélection (1%-99% percentiles)...")
-    
-            # Winsoriser les features pour la sélection
-            X_selection_winsorized = pd.DataFrame(
-                mstats.winsorize(X_selection.values, limits=[0.01, 0.01], axis=0),
-                columns=X_selection.columns,
-                index=X_selection.index
-            )
-    
-            # Winsoriser la target pour la sélection
-            y_selection_winsorized = pd.Series(
+            # === ÉTAPE 1 : WINSORISATION SÉLECTIVE ===
+            print(f"Winsorisation sélective des données (1%-99% percentiles)...")
+            
+            # Identifier les colonnes temporelles à exclure de la winsorisation
+            temporal_features = [col for col in X_selection.columns if 'decimal_year' in col or 'timestamp' in col or 'days_since' in col]
+            regular_features = [col for col in X_selection.columns if col not in temporal_features]
+            
+            print(f"Features temporelles (non winsorisées): {temporal_features}")
+            print(f"Features régulières (winsorisées): {len(regular_features)}")
+            
+            # Winsoriser seulement les features non-temporelles
+            X_selection_processed = X_selection.copy()
+            
+            if regular_features:  # S'il y a des features à winsoriser
+                X_selection_processed[regular_features] = pd.DataFrame(
+                    mstats.winsorize(X_selection[regular_features].values, limits=[0.01, 0.01], axis=0),
+                    columns=regular_features,
+                    index=X_selection.index
+                )
+            
+            # Winsoriser la target
+            y_selection_processed = pd.Series(
                 mstats.winsorize(y_selection.values, limits=[0.01, 0.01]),
                 index=y_selection.index
             )
     
-            # === ÉTAPE 2 : NORMALISATION POUR LA SÉLECTION ===
-            scaler_selection = StandardScaler()
-            X_selection_scaled = scaler_selection.fit_transform(X_selection_winsorized)
-    
-            # === ÉTAPE 3 : SÉLECTION DE FEATURES AVEC LASSO ===
+            # === ÉTAPE 2 : SÉLECTION DE FEATURES AVEC LASSO ===
             print(f"Sélection des features avec {feature_selection_method}...")
-            selected_features, lasso_alpha, lasso_coefs = feature_selector.select_features(
-                X_selection_scaled, y_selection_winsorized.values, feature_columns
-            )
-    
-            current_selected_features = selected_features
-            print(f"Features sélectionnées: {len(selected_features)}/{len(feature_columns)}")
-            print(f"Alpha optimal: {lasso_alpha:.6f}")
-            print(f"Top 5 features: {selected_features[:5]}")
             
-        # === PHASE 2: PRÉPARATION DES DONNÉES FINALES ===
-        # Préparer les données finales avec les features sélectionnées
-        if window_count % feature_selection_frequency == 0:
-            # Utiliser les données déjà winsorisées de la sélection
-            X_train_final = X_selection_winsorized[current_selected_features]
-            y_train_final = y_selection_winsorized
+            # Normalisation pour LASSO
+            scaler_selection = StandardScaler()
+            X_selection_scaled = scaler_selection.fit_transform(X_selection_processed)
             
-            # Préparer les données de test avec les mêmes transformations
-            X_test_raw = test_data[current_selected_features].fillna(X_train_final.median())
+            # Créer une liste de features pour LASSO (exclure features temporelles)
+            lasso_feature_columns = [col for col in feature_columns if col not in temporal_features]
+            lasso_feature_indices = [i for i, col in enumerate(feature_columns) if col in lasso_feature_columns]
             
-            # Appliquer les limites de winsorisation du train au test pour éviter le data leakage
-            train_percentiles_1 = np.percentile(X_train_final.values, 1, axis=0)
-            train_percentiles_99 = np.percentile(X_train_final.values, 99, axis=0)
-            
-            X_test_final = X_test_raw.copy()
-            for i, col in enumerate(X_test_final.columns):
-                X_test_final.iloc[:, i] = np.clip(
-                    X_test_final.iloc[:, i].values,
-                    train_percentiles_1[i],
-                    train_percentiles_99[i]
+            # Appliquer LASSO seulement sur les features non-temporelles
+            if lasso_feature_indices:  # S'il y a des features à sélectionner
+                X_for_lasso = X_selection_scaled[:, lasso_feature_indices]
+                selected_features_lasso, lasso_alpha, lasso_coefs = feature_selector.select_features(
+                    X_for_lasso, y_selection_processed.values, lasso_feature_columns
                 )
+            else:
+                selected_features_lasso = []
+                lasso_alpha = 0.0
             
-            # Pour y_test, appliquer les limites du train
-            y_train_p1 = np.percentile(y_train_final.values, 1)
-            y_train_p99 = np.percentile(y_train_final.values, 99)
-            y_test_final = np.clip(test_data[target_column].values, y_train_p1, y_train_p99)
+            # Ajouter automatiquement les features temporelles aux features sélectionnées
+            current_selected_features = selected_features_lasso + temporal_features
+            
+            print(f"Features sélectionnées par LASSO: {len(selected_features_lasso)}")
+            print(f"Features temporelles ajoutées automatiquement: {len(temporal_features)}")
+            print(f"Total features finales: {len(current_selected_features)}/{len(feature_columns)}")
+            if lasso_alpha > 0:
+                print(f"Alpha optimal: {lasso_alpha:.6f}")
+            if current_selected_features:
+                print(f"Top 5 features: {current_selected_features[:5]}")
+
+            # === ÉTAPE 3 : DONNÉES TRAIN FINALES (déjà traitées) ===
+            # Utiliser les données déjà winsorisées et sélectionnées
+            X_train_final = X_selection_processed[current_selected_features]
+            y_train_final = y_selection_processed
+            
+            # Sauvegarder les limites de winsorisation pour le test
+            winsorization_limits = {}
+            regular_features_selected = [col for col in current_selected_features if col not in temporal_features]
+            
+            if regular_features_selected:
+                winsorization_limits['train_percentiles_1'] = X_train_final[regular_features_selected].quantile(0.01)
+                winsorization_limits['train_percentiles_99'] = X_train_final[regular_features_selected].quantile(0.99)
+                winsorization_limits['regular_features'] = regular_features_selected
+            else:
+                winsorization_limits['regular_features'] = []
+            
+            winsorization_limits['y_train_p1'] = np.percentile(y_train_final.values, 1)
+            winsorization_limits['y_train_p99'] = np.percentile(y_train_final.values, 99)
             
         else:
-            # Si pas de nouvelle sélection, utiliser les données directement (avec winsorisation basique)
+            # === CAS SANS NOUVELLE SÉLECTION : RÉUTILISER LES PARAMÈTRES ===
+            print(f"Fenêtre {window_count + 1}: Réutilisation des features sélectionnées...")
+            
+            # Préparer les données avec les mêmes features sélectionnées
             X_train_raw = train_data[current_selected_features].fillna(train_data[current_selected_features].median())
             y_train_raw = train_data[target_column]
             
-            # Appliquer une winsorisation basique
-            X_train_final = pd.DataFrame(
-                mstats.winsorize(X_train_raw.values, limits=[0.01, 0.01], axis=0),
-                columns=X_train_raw.columns,
-                index=X_train_raw.index
-            )
+            # Identifier les features temporelles dans la sélection actuelle
+            temporal_features_current = [col for col in current_selected_features if 'decimal_year' in col or 'timestamp' in col or 'days_since' in col]
+            regular_features_current = [col for col in current_selected_features if col not in temporal_features_current]
+            
+            # WINSORISATION (une seule fois)
+            X_train_final = X_train_raw.copy()
+            
+            if regular_features_current:
+                X_train_final[regular_features_current] = pd.DataFrame(
+                    mstats.winsorize(X_train_raw[regular_features_current].values, limits=[0.01, 0.01], axis=0),
+                    columns=regular_features_current,
+                    index=X_train_raw.index
+                )
+            
             y_train_final = pd.Series(
                 mstats.winsorize(y_train_raw.values, limits=[0.01, 0.01]),
                 index=y_train_raw.index
             )
             
-            X_test_raw = test_data[current_selected_features].fillna(X_train_final.median())
+            # Sauvegarder les limites pour le test
+            winsorization_limits = {}
+            if regular_features_current:
+                winsorization_limits['train_percentiles_1'] = X_train_final[regular_features_current].quantile(0.01)
+                winsorization_limits['train_percentiles_99'] = X_train_final[regular_features_current].quantile(0.99)
+                winsorization_limits['regular_features'] = regular_features_current
+            else:
+                winsorization_limits['regular_features'] = []
             
-            # Appliquer les limites de winsorisation du train au test
-            train_percentiles_1 = np.percentile(X_train_final.values, 1, axis=0)
-            train_percentiles_99 = np.percentile(X_train_final.values, 99, axis=0)
-            
-            X_test_final = X_test_raw.copy()
-            for i, col in enumerate(X_test_final.columns):
-                X_test_final.iloc[:, i] = np.clip(
-                    X_test_final.iloc[:, i].values,
-                    train_percentiles_1[i],
-                    train_percentiles_99[i]
+            winsorization_limits['y_train_p1'] = np.percentile(y_train_final.values, 1)
+            winsorization_limits['y_train_p99'] = np.percentile(y_train_final.values, 99)
+
+        # === DONNÉES TEST FINALES (application des limites du train) ===
+        # Préparer les données de test SANS re-winsoriser, juste appliquer les limites
+        X_test_raw = test_data[current_selected_features].fillna(X_train_final.median())
+        X_test_final = X_test_raw.copy()
+        
+        # Appliquer SEULEMENT les limites des données train aux features régulières
+        if winsorization_limits['regular_features']:
+            for col in winsorization_limits['regular_features']:
+                X_test_final[col] = np.clip(
+                    X_test_final[col].values,
+                    winsorization_limits['train_percentiles_1'][col],
+                    winsorization_limits['train_percentiles_99'][col]
                 )
-            
-            y_train_p1 = np.percentile(y_train_final.values, 1)
-            y_train_p99 = np.percentile(y_train_final.values, 99)
-            y_test_final = np.clip(test_data[target_column].values, y_train_p1, y_train_p99)
+        
+        # Pour y_test, appliquer les limites du train
+        y_test_final = np.clip(
+            test_data[target_column].values, 
+            winsorization_limits['y_train_p1'], 
+            winsorization_limits['y_train_p99']
+        )
 
         # === NORMALISATION FINALE ===
         scaler = StandardScaler()
@@ -557,9 +602,8 @@ def sliding_window_dl_prediction_with_lasso(
 
         print(f"Données préparées. Features: {X_train_scaled.shape[1]}, "
               f"Échantillons train: {len(X_train_scaled)}, test: {len(X_test_scaled)}")
-
-       
-        # --- PHASE 2: HYPERPARAMETER TUNING ---
+        
+        # --- PHASE 3: HYPERPARAMETER TUNING ---
         if enable_bayesian_tuning and (window_count % tune_frequency == 0):
             """
             Bayesian hyperparameter tuning (with Optuna) on training set using
