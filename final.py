@@ -17,7 +17,7 @@ TRADING_PARAM = {
     
     # Paramètres de stratégie
     'percentile_threshold': 0.1,  # 10% top et bottom
-    'rebalance_frequency': 'yearly',
+    'rebalance_frequency': 'monthly',
     
     # Paramètres Deep Learning + Lasso
     'dl_n_trials': 5, #on s'arrete après 5 tentatives d'optimization car trop demandant niveau calcul
@@ -124,7 +124,8 @@ def main():
             target_column=TRADING_PARAM['target_column'],
             train_years=TRADING_PARAM['train_years'],
             test_years=TRADING_PARAM['test_years_rf_xgb'],
-            tune_frequency=TRADING_PARAM['tune_frequency']
+            tune_frequency=TRADING_PARAM['tune_frequency'],
+            enable_bayesian_tuning = TRADING_PARAM['enable_bayesian_tuning']
         )
     
     # 2. XGBoost
@@ -136,7 +137,8 @@ def main():
             target_column=TRADING_PARAM['target_column'],
             train_years=TRADING_PARAM['train_years'],
             test_years=TRADING_PARAM['test_years_rf_xgb'],
-            tune_frequency=TRADING_PARAM['tune_frequency']
+            tune_frequency=TRADING_PARAM['tune_frequency'],
+            enable_bayesian_tuning = TRADING_PARAM['enable_bayesian_tuning']
         )
     
     # 3. Deep Learning + Lasso
@@ -256,3 +258,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
