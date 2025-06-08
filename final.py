@@ -5,7 +5,7 @@
 TRADING_PARAM = {
     # Paramètres de données
     'date_column': 'date',
-    'target_column': 'target_ret',
+    'target_column': 'ret_target',
     
     # Paramètres de fenêtre glissante
     'train_years': 20,
@@ -17,7 +17,7 @@ TRADING_PARAM = {
     
     # Paramètres de stratégie
     'percentile_threshold': 0.1,  # 10% top et bottom
-    'rebalance_frequency': 'monthly',
+    'rebalance_frequency': 'yearly',
     
     # Paramètres Deep Learning + Lasso
     'dl_n_trials': 5, #on s'arrete après 5 tentatives d'optimization car trop demandant niveau calcul
@@ -31,7 +31,7 @@ TRADING_PARAM = {
     'memory_factor': 0.3,
     
     # Fichiers et dossiers
-    'data_filename': 'formatted_full_data_test_1.csv',
+    'data_filename': 'merged.csv',
     'output_folder': 'results'
 }
 
@@ -100,12 +100,14 @@ def main():
     folder = os.path.dirname(os.path.abspath(__file__))
     main_csv = os.path.join(folder, TRADING_PARAM['data_filename'])
     
+    
     # Chargement des données
     print("Chargement des données...")
     merged = pd.read_csv(main_csv)
     
     #Choix de ou commencer le data
     merged = merged[merged['date'] >= '2000-01-01']
+    
     # Dictionnaires pour stocker les résultats
     results = {}
     strategies = {}
