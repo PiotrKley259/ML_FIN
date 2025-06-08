@@ -1077,12 +1077,7 @@ def sliding_window_dl_prediction_with_lasso(
 
     print(f"\n=== RÉSULTATS GLOBAUX DEEP LEARNING avec SÉLECTION LASSO ===")
     print(f"R² global: {overall_metrics['overall_r2']:.4f}")
-    print(f"RMSE global: {overall_metrics
-          
-          
-          
-          
-          ['overall_rmse']:.6f}")
+    print(f"RMSE global: {overall_metrics['overall_rmse']:.4f}")
     print(f"R² moyen par fenêtre: {overall_metrics['avg_window_r2']:.4f}")
     print(f"Nombre de fenêtres: {overall_metrics['n_windows']}")
     print(f"Époques moyennes: {overall_metrics['avg_epochs']:.1f}")
