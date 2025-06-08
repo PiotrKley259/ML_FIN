@@ -1177,15 +1177,16 @@ def sliding_window_r_prediction(
     tune_frequency: int = 4,
     n_trials: int = 20,
     early_stopping_rounds: int = 5,
-    include_date_as_feature : bool = True,
+    include_date_as_feature: bool = True,
+    enable_bayesian_tuning: bool = False,
     **base_rf_params
 ) -> Dict[str, Any]:
     """
-    Sliding window Random Forest regression with Bayesian hyperparameter tuning (Optuna) and early stopping.
+    Sliding window Random Forest regression with optional Bayesian hyperparameter tuning (Optuna) and early stopping.
 
     The process:
       - Uses a walk-forward windowing over the time series to train/test on moving periods.
-      - Runs Bayesian hyperparameter optimization (with Optuna) at a given frequency, using early stopping to speed up.
+      - Optionally runs Bayesian hyperparameter optimization (with Optuna) at a given frequency, using early stopping to speed up.
       - Trains a Random Forest on each window and stores predictions, metrics, and feature importances.
       - Aggregates overall and per-window metrics.
 
@@ -1209,6 +1210,10 @@ def sliding_window_r_prediction(
         Number of Optuna trials for hyperparameter optimization.
     early_stopping_rounds : int
         Early stopping patience for Optuna.
+    include_date_as_feature : bool
+        Whether to include date-based features.
+    enable_bayesian_tuning : bool
+        Whether to enable Bayesian hyperparameter tuning with Optuna.
     **base_rf_params : dict
         Additional parameters to override RandomForest defaults.
 
@@ -1259,10 +1264,12 @@ def sliding_window_r_prediction(
 
     # Default Random Forest parameters (can be overridden)
     base_params = {
-        'n_estimators': 100,
-        'max_depth': 10,
-        'min_samples_split': 5,
-        'min_samples_leaf': 2,
+        'n_estimators': 200,
+        'max_depth': 15,
+        'min_samples_split': 20,
+        'min_samples_leaf': 10,
+        'max_features' : 0.3,
+        'bootstrap': True,
         'random_state': 42,
         'n_jobs': -1
     }
@@ -1284,11 +1291,15 @@ def sliding_window_r_prediction(
     window_count = 0
     best_params = base_params.copy()
 
-    print(f"=== RANDOM FOREST - BAYESIAN TUNING ===")
+    print(f"=== RANDOM FOREST - {'BAYESIAN TUNING' if enable_bayesian_tuning else 'FIXED PARAMS'} ===")
     print(f"Période totale: {min_date.strftime('%Y-%m')} à {max_date.strftime('%Y-%m')}")
     print(f"Fenêtre d'entraînement: {train_years} ans")
     print(f"Fenêtre de test: {test_years} ans")
-    print(f"Tuning bayésien tous les {tune_frequency} pas\n")
+    if enable_bayesian_tuning:
+        print(f"Tuning bayésien tous les {tune_frequency} pas")
+    else:
+        print(f"Utilisation des paramètres fixes: {best_params}")
+    print()
 
     """ --- MAIN SLIDING WINDOW LOOP --- """
     while True:
@@ -1317,7 +1328,7 @@ def sliding_window_r_prediction(
         y_test = test_data[target_column]
 
         """ --- BAYESIAN HYPERPARAMETER TUNING (Optuna) --- """
-        if window_count % tune_frequency == 0:
+        if enable_bayesian_tuning and window_count % tune_frequency == 0:
             print(f"Fenêtre {window_count + 1}: Hyperparameter tuning bayésien en cours...")
 
             def objective(trial):
@@ -1429,15 +1440,16 @@ def sliding_window_xgb_prediction(
     tune_frequency: int = 4,
     n_trials: int = 20,
     early_stopping_rounds: int = 10,# Not used in XGB fit, only for Optuna stopping
-    include_date_as_feature : bool = True,
+    include_date_as_feature: bool = True,
+    enable_bayesian_tuning: bool = False,
     **base_xgb_params
 ) -> Dict[str, Any]:
     """
-    Sliding window XGBoost regression with Bayesian hyperparameter optimization (Optuna).
+    Sliding window XGBoost regression with optional Bayesian hyperparameter optimization (Optuna).
 
     For each time window:
       - Uses walk-forward validation to simulate real-time forecasting.
-      - Performs Bayesian hyperparameter search (Optuna) every N windows, with early stopping.
+      - Optionally performs Bayesian hyperparameter search (Optuna) every N windows, with early stopping.
       - Fits an XGBoost regressor and stores predictions, window metrics, and feature importances.
 
     Parameters
@@ -1460,6 +1472,10 @@ def sliding_window_xgb_prediction(
         Number of Optuna trials for each hyperparameter search.
     early_stopping_rounds : int
         Patience for Optuna study early stopping (NOT used in XGB fit directly).
+    include_date_as_feature : bool
+        Whether to include date-based features.
+    enable_bayesian_tuning : bool
+        Whether to enable Bayesian hyperparameter tuning with Optuna.
     **base_xgb_params : dict
         Additional or overriding keyword arguments for XGBoost.
 
@@ -1534,11 +1550,15 @@ def sliding_window_xgb_prediction(
     window_count = 0
     best_params = base_params.copy()
     
-    print(f"\n=== XGBOOST - BAYESIAN TUNING ===")
+    print(f"\n=== XGBOOST - {'BAYESIAN TUNING' if enable_bayesian_tuning else 'FIXED PARAMS'} ===")
     print(f"Période totale: {min_date.strftime('%Y-%m')} à {max_date.strftime('%Y-%m')}")
     print(f"Fenêtre d'entraînement: {train_years} ans")
     print(f"Fenêtre de test: {test_years} ans")
-    print(f"Tuning bayésien tous les {tune_frequency} pas\n")
+    if enable_bayesian_tuning:
+        print(f"Tuning bayésien tous les {tune_frequency} pas")
+    else:
+        print(f"Utilisation des paramètres fixes: {best_params}")
+    print()
     
     """ --- MAIN SLIDING WINDOW LOOP --- """
     while True:
@@ -1563,7 +1583,7 @@ def sliding_window_xgb_prediction(
         y_test = test_data[target_column]
         
         """ --- HYPERPARAMETER TUNING (Optuna, every N windows) --- """
-        if window_count % tune_frequency == 0:
+        if enable_bayesian_tuning and window_count % tune_frequency == 0:
             print(f"Fenêtre {window_count + 1}: Hyperparameter tuning bayésien en cours...")
 
             def objective(trial):
