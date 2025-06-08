@@ -445,7 +445,7 @@ def sliding_window_dl_prediction_with_lasso(
         if len(train_data) < 100 or len(test_data) < 10:
             current_start += pd.DateOffset(years=1)
             continue
-            # --- PHASE 1: FEATURE SELECTION ---
+# --- PHASE 1: FEATURE SELECTION ---
         if window_count % feature_selection_frequency == 0:
             print(f"Fenêtre {window_count + 1}: Préparation des données pour sélection des features...")
     
@@ -464,7 +464,7 @@ def sliding_window_dl_prediction_with_lasso(
             # Features régulières (winsorisées ET normalisées)
             regular_features = [col for col in X_selection.columns if col not in protected_features]
             
-            print(f"Features protégées (non winsorisées, non normalisées): {protected_features}")
+            print(f"Features protégées (non winsorisées): {protected_features}")
             print(f"Features régulières (winsorisées + normalisées): {len(regular_features)}")
             
             # === WINSORISATION UNIQUE + SAUVEGARDE DES LIMITES ===
@@ -518,12 +518,15 @@ def sliding_window_dl_prediction_with_lasso(
                 selected_features_lasso = []
                 lasso_alpha = 0.0
             
-            # Ajouter automatiquement les features protégées aux features sélectionnées
-            current_selected_features = selected_features_lasso + protected_features
+            # === EXCLUSION DE STOCK_IDX DES FEATURES FINALES ===
+            # Ajouter automatiquement les features protégées SAUF stock_idx
+            protected_features_for_model = [col for col in protected_features if 'stock_idx' not in col]
+            current_selected_features = selected_features_lasso + protected_features_for_model
             
             print(f"Features sélectionnées par LASSO: {len(selected_features_lasso)}")
-            print(f"Features protégées ajoutées automatiquement: {len(protected_features)}")
+            print(f"Features protégées ajoutées (SANS stock_idx): {len(protected_features_for_model)}")
             print(f"Total features finales: {len(current_selected_features)}/{len(feature_columns)}")
+            print(f"stock_idx EXCLU du modèle (gardé seulement pour identification)")
             if lasso_alpha > 0:
                 print(f"Alpha optimal: {lasso_alpha:.6f}")
             if current_selected_features:
@@ -536,7 +539,7 @@ def sliding_window_dl_prediction_with_lasso(
             
             # Mettre à jour les limites pour les features sélectionnées seulement
             winsorization_limits = {}
-            regular_features_selected = [col for col in current_selected_features if col not in protected_features]
+            regular_features_selected = [col for col in current_selected_features if col not in protected_features_for_model]
             
             if regular_features_selected:
                 # Utiliser les limites des features sélectionnées seulement
@@ -557,10 +560,10 @@ def sliding_window_dl_prediction_with_lasso(
             X_train_raw = train_data[current_selected_features].fillna(train_data[current_selected_features].median())
             y_train_raw = train_data[target_column]
             
-            # Identifier les features protégées dans la sélection actuelle
+            # Identifier les features protégées dans la sélection actuelle (SANS stock_idx)
             protected_features_current = [col for col in current_selected_features if 
                                         'decimal_year' in col or 'timestamp' in col or 'days_since' in col or
-                                        '_mask' in col or '_flag' in col or 'stock_idx' in col]
+                                        '_mask' in col or '_flag' in col]
             regular_features_current = [col for col in current_selected_features if col not in protected_features_current]
             
             # === APPLIQUER LES LIMITES SAUVEGARDÉES (PAS DE NOUVELLE WINSORISATION) ===
@@ -609,10 +612,10 @@ def sliding_window_dl_prediction_with_lasso(
             winsorization_limits['y_train_p99']
         )
 
-        # === NORMALISATION FINALE SÉLECTIVE ===
-        # Identifier les features à normaliser et celles à garder intactes
+        # === NORMALISATION FINALE SÉLECTIVE (SANS stock_idx) ===
+        # Identifier les features à normaliser et celles à garder intactes (SANS stock_idx)
         features_to_normalize = [col for col in current_selected_features if 
-                               'stock_idx' not in col and 'decimal_year' not in col and '_flag' not in col]
+                               '_mask' not in col and '_flag' not in col and 'decimal_year' not in col]
         features_to_keep_raw = [col for col in current_selected_features if col not in features_to_normalize]
         
         print(f"Features à normaliser: {len(features_to_normalize)}")
@@ -624,25 +627,35 @@ def sliding_window_dl_prediction_with_lasso(
             X_train_normalized = scaler.fit_transform(X_train_final[features_to_normalize])
             X_test_normalized = scaler.transform(X_test_final[features_to_normalize])
             
-            # Reconstruire les DataFrames complets
-            X_train_scaled = np.column_stack([
-                X_train_normalized,  # Features normalisées
-                X_train_final[features_to_keep_raw].values  # Features brutes (stock_idx, masks, etc.)
-            ])
-            
-            X_test_scaled = np.column_stack([
-                X_test_normalized,   # Features normalisées  
-                X_test_final[features_to_keep_raw].values   # Features brutes
-            ])
-            
-            # Créer la liste des noms de colonnes dans le bon ordre
-            final_feature_names = features_to_normalize + features_to_keep_raw
-            
+            if features_to_keep_raw:
+                # Reconstruire les DataFrames complets (sans stock_idx)
+                X_train_scaled = np.column_stack([
+                    X_train_normalized,  # Features normalisées
+                    X_train_final[features_to_keep_raw].values  # Features brutes (masks, decimal_year)
+                ])
+                
+                X_test_scaled = np.column_stack([
+                    X_test_normalized,   # Features normalisées  
+                    X_test_final[features_to_keep_raw].values   # Features brutes
+                ])
+                
+                # Créer la liste des noms de colonnes dans le bon ordre (sans stock_idx)
+                final_feature_names = features_to_normalize + features_to_keep_raw
+            else:
+                # Seulement features normalisées
+                X_train_scaled = X_train_normalized
+                X_test_scaled = X_test_normalized
+                final_feature_names = features_to_normalize
+                
         else:
-            # Si aucune feature à normaliser, garder tout brut
-            X_train_scaled = X_train_final.values
-            X_test_scaled = X_test_final.values
-            final_feature_names = current_selected_features
+            # Si aucune feature à normaliser, garder seulement les features brutes (sans stock_idx)
+            if features_to_keep_raw:
+                X_train_scaled = X_train_final[features_to_keep_raw].values
+                X_test_scaled = X_test_final[features_to_keep_raw].values
+                final_feature_names = features_to_keep_raw
+            else:
+                # Cas extrême: aucune feature utilisable
+                raise ValueError("Aucune feature utilisable après exclusion de stock_idx!")
         
         # Variables finales pour la suite du code
         y_train = pd.Series(y_train_final, index=X_train_final.index)
@@ -652,12 +665,12 @@ def sliding_window_dl_prediction_with_lasso(
               f"Échantillons train: {len(X_train_scaled)}, test: {len(X_test_scaled)}")
         print(f"Features finales: {final_feature_names}")
         
-        # Vérification spéciale pour stock_idx
+        # Vérification finale que stock_idx est bien absent
         if any('stock_idx' in col for col in final_feature_names):
-            stock_idx_position = [i for i, col in enumerate(final_feature_names) if 'stock_idx' in col][0]
-            print(f"stock_idx préservé à la position {stock_idx_position} (valeurs brutes)")
+            print("ERREUR: stock_idx encore présent dans les features finales!")
+            raise ValueError("stock_idx ne devrait pas être dans les features d'entraînement!")
         else:
-            print("stock_idx non trouvé dans les features finales!")
+            print("stock_idx correctement exclu des features d'entraînement")
             
         # === RÉSUMÉ DE LA WINSORISATION ===
         if window_count % feature_selection_frequency == 0:
