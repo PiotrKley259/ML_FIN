@@ -567,7 +567,7 @@ def sliding_window_dl_prediction_with_lasso(
             X_train_final = X_train_raw.copy()
             
             if regular_features_current and winsorization_limits['regular_features']:
-                print(f"🔒 Application des limites de winsorisation sauvegardées sur {len(regular_features_current)} features")
+                print(f"Application des limites de winsorisation sauvegardées sur {len(regular_features_current)} features")
                 
                 # Appliquer les MÊMES limites que lors de la sélection (pas de nouvelle winsorisation)
                 for col in regular_features_current:
@@ -612,7 +612,7 @@ def sliding_window_dl_prediction_with_lasso(
         # === NORMALISATION FINALE SÉLECTIVE ===
         # Identifier les features à normaliser et celles à garder intactes
         features_to_normalize = [col for col in current_selected_features if 
-                               'stock_idx' not in col and '_mask' not in col and '_flag' not in col]
+                               'stock_idx' not in col and 'decimal_year' not in col and '_flag' not in col]
         features_to_keep_raw = [col for col in current_selected_features if col not in features_to_normalize]
         
         print(f"Features à normaliser: {len(features_to_normalize)}")
