@@ -380,7 +380,7 @@ def sliding_window_dl_prediction_with_lasso(
 
     # --- Deep Learning Parameter Defaults ---
     base_params = {
-        'hidden_layers': [1024, 512, 256, 128],
+        'hidden_layers': [1024, 512, 256, 128, 64],
         'dropout_rate': 0.3, #nombre de neurones désactivés à chaque passe
         'learning_rate': 0.001,
         'batch_size': 1024,
@@ -464,7 +464,6 @@ def sliding_window_dl_prediction_with_lasso(
             # Features régulières (winsorisées ET normalisées)
             regular_features = [col for col in X_selection.columns if col not in protected_features]
             
-            print(f"Features protégées (non winsorisées): {protected_features}")
             print(f"Features régulières (winsorisées + normalisées): {len(regular_features)}")
             
             # === WINSORISATION UNIQUE + SAUVEGARDE DES LIMITES ===
@@ -514,6 +513,9 @@ def sliding_window_dl_prediction_with_lasso(
                 selected_features_lasso, lasso_alpha, lasso_coefs = feature_selector.select_features(
                     X_regular_scaled, y_selection_processed.values, lasso_feature_columns
                 )
+                
+                if lasso_alpha is None:
+                    lasso_alpha = 0.0
             else:
                 selected_features_lasso = []
                 lasso_alpha = 0.0
@@ -521,9 +523,21 @@ def sliding_window_dl_prediction_with_lasso(
             # === EXCLUSION DE STOCK_IDX DES FEATURES FINALES ===
             # Ajouter automatiquement les features protégées SAUF stock_idx
             protected_features_for_model = [col for col in protected_features if 'permno' not in col]
-            current_selected_features = selected_features_lasso + protected_features_for_model
             
-            print(f"Features sélectionnées par LASSO: {len(selected_features_lasso)}")
+            non_flag_protected = [col for col in protected_features_for_model if '_flag' not in col]
+
+            # Pour chaque feature sélectionnée par Lasso, chercher sa flag correspondante
+            corresponding_flags = []
+            for selected_feature in selected_features_lasso:
+                # Chercher si une flag correspondante existe (ex: jkp_38 -> jkp_38_flag)
+                potential_flag = selected_feature + '_flag'
+                if potential_flag in feature_columns:
+                    corresponding_flags.append(potential_flag)
+
+            # Final features: Lasso selected + flags correspondantes + autres features protégées (SANS stock_idx)
+            current_selected_features = selected_features_lasso + corresponding_flags + non_flag_protected
+            
+            print(f"Features sélectionnées: {len(selected_features_lasso)}")
             print(f"Features protégées ajoutées (SANS stock_idx): {len(protected_features_for_model)}")
             print(f"Total features finales: {len(current_selected_features)}/{len(feature_columns)}")
             print(f"stock_idx EXCLU du modèle (gardé seulement pour identification)")
@@ -619,7 +633,6 @@ def sliding_window_dl_prediction_with_lasso(
         features_to_keep_raw = [col for col in current_selected_features if col not in features_to_normalize]
         
         print(f"Features à normaliser: {len(features_to_normalize)}")
-        print(f"Features gardées brutes: {features_to_keep_raw}")
         
         # Normaliser seulement les features appropriées
         if features_to_normalize:
@@ -663,7 +676,6 @@ def sliding_window_dl_prediction_with_lasso(
 
         print(f"Données préparées. Features: {X_train_scaled.shape[1]}, "
               f"Échantillons train: {len(X_train_scaled)}, test: {len(X_test_scaled)}")
-        print(f"Features finales: {final_feature_names}")
         
         # Vérification finale que stock_idx est bien absent
         if any('permno' in col for col in final_feature_names):

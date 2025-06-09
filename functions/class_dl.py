@@ -15,6 +15,8 @@ from tqdm import tqdm
 
 # Machine Learning & Preprocessing
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.feature_selection import SelectFromModel
 from sklearn.linear_model import LassoCV, ElasticNetCV
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import (
@@ -143,15 +145,13 @@ class DeepLearningRegressor(nn.Module):
 class AdaptiveFeatureSelector:
     """
     Adaptive feature selector using Lasso (and related) strategies.
-
     Supports standard Lasso, ElasticNet, and two-step adaptive Lasso feature selection.
     Includes stability selection with memory and thresholding for more robust results
     over multiple selection rounds (such as in time-series or cross-validation).
-    
     Parameters
     ----------
     method : str
-        Feature selection method: 'lasso', 'elastic_net', or 'adaptive_lasso'
+        Feature selection method: 'lasso', 'elastic_net', 'adaptive_lasso', or 'random_forest'
     alpha_range : tuple
         Range of regularization strengths (alphas) to search
     max_features : int or None
@@ -163,10 +163,9 @@ class AdaptiveFeatureSelector:
     memory_factor : float
         Controls exponential smoothing of stability scores (between 0 and 1)
     """
-
     def __init__(
-        self, 
-        method='lasso', 
+        self,
+        method='lasso',
         alpha_range=(1e-4, 1e-1),
         max_features=None,
         min_features=5,
@@ -182,7 +181,6 @@ class AdaptiveFeatureSelector:
         self.min_features = min_features
         self.stability_threshold = stability_threshold
         self.memory_factor = memory_factor
-        
         # Feature selection history and stability scores (used for stability selection)
         self.feature_history = []
         self.stability_scores = {}
@@ -194,18 +192,16 @@ class AdaptiveFeatureSelector:
         """
         if self.method == 'lasso':
             # LassoCV for Lasso-based feature selection
-            alphas = np.logspace(np.log10(self.alpha_range[0]), 
-                                 np.log10(self.alpha_range[1]), 500)
+            alphas = np.logspace(np.log10(self.alpha_range[0]),
+                                np.log10(self.alpha_range[1]), 500)
             return LassoCV(alphas=alphas, cv=5, random_state=42, max_iter=2000)
-        
         elif self.method == 'elastic_net':
             # ElasticNetCV for ElasticNet-based feature selection
-            alphas = np.logspace(np.log10(self.alpha_range[0]), 
-                                 np.log10(self.alpha_range[1]), 200)
+            alphas = np.logspace(np.log10(self.alpha_range[0]),
+                                np.log10(self.alpha_range[1]), 200)
             l1_ratios = [0.1, 0.3, 0.5, 0.7, 0.9]
-            return ElasticNetCV(alphas=alphas, l1_ratio=l1_ratios, 
-                                cv=5, random_state=42, max_iter=2000)
-        
+            return ElasticNetCV(alphas=alphas, l1_ratio=l1_ratios,
+                               cv=5, random_state=42, max_iter=2000)
         elif self.method == 'adaptive_lasso':
             """
             Adaptive Lasso: fit a Ridge to get weights, then fit Lasso with inverse weights.
@@ -215,13 +211,29 @@ class AdaptiveFeatureSelector:
             ridge.fit(X, y)
             weights = 1 / (np.abs(ridge.coef_) + 1e-8)
             X_weighted = X / weights
-            alphas = np.logspace(np.log10(self.alpha_range[0]), 
-                                 np.log10(self.alpha_range[1]), 500)
+            alphas = np.logspace(np.log10(self.alpha_range[0]),
+                                np.log10(self.alpha_range[1]), 500)
             lasso = LassoCV(alphas=alphas, cv=5, random_state=42, max_iter=2000)
             lasso.fit(X_weighted, y)
             # Adjust coefficients back to original scale
             lasso.coef_ = lasso.coef_ / weights
             return lasso
+        elif self.method == 'random_forest':
+            # Random Forest for feature importance-based selection
+            from sklearn.ensemble import RandomForestRegressor
+            from sklearn.feature_selection import SelectFromModel
+            
+            rf = RandomForestRegressor(
+                n_estimators=100,
+                max_depth=None,
+                min_samples_split=2,
+                min_samples_leaf=1,
+                random_state=42,
+                n_jobs=-1
+            )
+            # Use SelectFromModel to select features based on importance
+            selector = SelectFromModel(rf, threshold='median')
+            return selector
         else:
             raise ValueError(f"Method {self.method} is not supported.")
 
@@ -234,31 +246,69 @@ class AdaptiveFeatureSelector:
         selected_features : list of str
             Names of selected features
         alpha : float
-            Regularization strength chosen by CV
+            Regularization strength chosen by CV (None for random_forest)
         selected_coefs : array
-            Nonzero coefficients of selected features
+            Nonzero coefficients of selected features (feature importances for random_forest)
         """
         # Get and fit the selector model
         selector_model = self._get_selector_model(X, y)
         if self.method != 'adaptive_lasso':
             selector_model.fit(X, y)
         
-        # Features with nonzero (abs > 1e-8) coefficients are selected
-        selected_mask = np.abs(selector_model.coef_) > 1e-8
+        # Handle different types of selectors
+        if self.method == 'random_forest':
+            # For Random Forest, use the transform method to get selected features
+            selected_mask = selector_model.get_support()
+            alpha_value = None  # Random Forest doesn't have alpha
+            # Get feature importances for selected features
+            feature_importances = selector_model.estimator_.feature_importances_
+            selected_coefs = feature_importances[selected_mask]
+        else:
+            # For regularization methods (Lasso, ElasticNet, Adaptive Lasso)
+            # Features with nonzero (abs > 1e-8) coefficients are selected
+            selected_mask = np.abs(selector_model.coef_) > 1e-8
+            alpha_value = selector_model.alpha_
+            selected_coefs = selector_model.coef_[selected_mask]
         
         # Limit number of features if max_features is set
         if self.max_features is not None and np.sum(selected_mask) > self.max_features:
-            coef_abs = np.abs(selector_model.coef_)
-            top_indices = np.argsort(coef_abs)[-self.max_features:]
+            if self.method == 'random_forest':
+                # For Random Forest, sort by feature importance
+                feature_importances = selector_model.estimator_.feature_importances_
+                top_indices = np.argsort(feature_importances)[-self.max_features:]
+            else:
+                # For regularization methods, sort by coefficient magnitude
+                coef_abs = np.abs(selector_model.coef_)
+                top_indices = np.argsort(coef_abs)[-self.max_features:]
+            
             selected_mask = np.zeros_like(selected_mask, dtype=bool)
             selected_mask[top_indices] = True
+            
+            # Update selected_coefs accordingly
+            if self.method == 'random_forest':
+                selected_coefs = feature_importances[selected_mask]
+            else:
+                selected_coefs = selector_model.coef_[selected_mask]
         
         # Ensure at least min_features are selected
         if np.sum(selected_mask) < self.min_features:
-            coef_abs = np.abs(selector_model.coef_)
-            top_indices = np.argsort(coef_abs)[-self.min_features:]
+            if self.method == 'random_forest':
+                # For Random Forest, sort by feature importance
+                feature_importances = selector_model.estimator_.feature_importances_
+                top_indices = np.argsort(feature_importances)[-self.min_features:]
+            else:
+                # For regularization methods, sort by coefficient magnitude
+                coef_abs = np.abs(selector_model.coef_)
+                top_indices = np.argsort(coef_abs)[-self.min_features:]
+            
             selected_mask = np.zeros_like(selected_mask, dtype=bool)
             selected_mask[top_indices] = True
+            
+            # Update selected_coefs accordingly
+            if self.method == 'random_forest':
+                selected_coefs = feature_importances[selected_mask]
+            else:
+                selected_coefs = selector_model.coef_[selected_mask]
         
         selected_features = [feature_names[i] for i in range(len(feature_names)) if selected_mask[i]]
         
@@ -270,7 +320,7 @@ class AdaptiveFeatureSelector:
         # Record selection history
         self.feature_history.append(selected_features)
         
-        return selected_features, selector_model.alpha_, selector_model.coef_[selected_mask]
+        return selected_features, alpha_value, selected_coefs
 
     def _update_stability_scores(self, selected_features, all_features):
         """
@@ -292,7 +342,7 @@ class AdaptiveFeatureSelector:
         """
         # Select features with high stability
         stable_features = [
-            f for f in all_features 
+            f for f in all_features
             if self.stability_scores.get(f, 0) >= self.stability_threshold
         ]
         # Combine and deduplicate
